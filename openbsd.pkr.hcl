@@ -1,12 +1,12 @@
 variable "os_version" {
+  default = "snapshots"
   type = string
-  description = "The version of the operating system to download and install"
+  description = "The version of OpenBSD to build"
 }
 
-variable "architecture" {
-  default = "x86-64"
+variable "os_number" {
   type = string
-  description = "The type of CPU to use when building"
+  description = "The numbered extension while building snapshots"
 }
 
 variable "machine_type" {
@@ -34,7 +34,7 @@ variable "cpus" {
 }
 
 variable "disk_size" {
-  default = "12G"
+  default = "50G"
   type = string
   description = "The size in bytes of the hard disk of the VM"
 }
@@ -45,119 +45,74 @@ variable "checksum" {
 }
 
 variable "root_password" {
-  default = "vagrant"
+  default = "packer"
   type = string
   description = "The password for the root user"
 }
 
-variable "secondary_user_password" {
-  default = "vagrant"
-  type = string
-  description = "The password for the `secondary_user_username` user"
-}
-
-variable "secondary_user_username" {
-  default = "vagrant"
-  type = string
-  description = "The name for the secondary user"
-}
-
 variable "headless" {
-  default = false
+  default = true
   description = "When this value is set to `true`, the machine will start without a console"
 }
 
-variable "use_default_display" {
-  default = true
-  type = bool
-  description = "If true, do not pass a -display option to qemu, allowing it to choose the default"
-}
-
-variable "display" {
-  default = "cocoa"
-  description = "What QEMU -display option to use"
-}
-
-variable "accelerator" {
-  default = "tcg"
-  type = string
-  description = "The accelerator type to use when running the VM"
-}
-
 variable "firmware" {
+  default = "OVMF.fd"
   type = string
   description = "The firmware file to be used by QEMU"
 }
 
 variable "readonly_boot_media" {
-  default = true
+  default = false
   description = "If true, the boot media will be mounted as readonly"
 }
 
-variable "sudo_version" {
-  type = string
-  description = "The version of the sudo package to install"
-}
-
-variable "rsync_version" {
-  type = string
-  description = "The version of the rsync package to install"
+variable "vnc_bind_address" {
+  default = "127.0.0.1"
+  description = "VNC server bind address"
 }
 
 locals {
-  image_architecture = var.architecture == "x86-64" ? "amd64" : var.architecture
-  image = "miniroot${replace(var.os_version, ".", "")}.img"
-  vm_name = "openbsd-${var.os_version}-${var.architecture}.qcow2"
+  image_architecture = "amd64"
+
+  image = "miniroot${var.os_number}.img"
+  vm_name = "openbsd-${var.os_version}-x86_64.qcow2"
 
   iso_target_extension = "img"
   iso_target_path = "packer_cache"
-  iso_full_target_path = "${local.iso_target_path}/${sha1(var.checksum)}.${local.iso_target_extension}"
-
-  qemu_architecture = var.architecture == "arm64" ? "aarch64" : (
-    var.architecture == "x86-64" ? "x86_64" : var.architecture
-  )
+  iso_full_target_path = "${local.iso_target_path}/${var.checksum}.${local.iso_target_extension}"
 
   readonly_boot_media = var.readonly_boot_media ? "on" : "off"
 }
 
 source "qemu" "qemu" {
-  machine_type = var.machine_type
-  cpus = var.cpus
-  memory = var.memory
-  net_device = "e1000"
-
-  disk_compression = true
-  disk_interface = "virtio"
-  disk_size = var.disk_size
-  format = "qcow2"
-
-  headless = var.headless
-  use_default_display = var.use_default_display
-  display = var.display
-  accelerator = var.accelerator
-  qemu_binary = "qemu-system-${local.qemu_architecture}"
-  firmware = var.firmware
-
+  boot_command = [
+    "a<enter>",
+    "<wait5>",
+    "http://{{ .HTTPIP }}:{{ .HTTPPort }}/install.conf<enter>",
+    "<wait15>",
+    "i<enter>",
+  ]
   boot_wait = "30s"
 
-  boot_command = [
-    "S<enter><wait>",
-    "dhclient em0<enter><wait>",
-    "ftp -o install.conf http://{{ .HTTPIP }}:{{ .HTTPPort }}/resources/install.conf<enter><wait>",
-    "ftp -o install.sh http://{{ .HTTPIP }}:{{ .HTTPPort }}/resources/install.sh<enter><wait>",
-    "SECONDARY_USER_USERNAME=${var.secondary_user_username} ",
-    "SECONDARY_USER_PASSWORD=${var.secondary_user_password} ",
-    "ROOT_PASSWORD=${var.root_password} ",
-    "DISKLABEL_TEMPLATE='http://{{ .HTTPIP }}:{{ .HTTPPort }}/resources/template.disklabel' ",
-    "sh install.sh && reboot<enter>"
-  ]
+  cpus = var.cpus
+
+  disk_compression = true
+  disk_size = var.disk_size
+
+  firmware = var.firmware
+
+  headless = var.headless
+
+  machine_type = var.machine_type
+  memory = var.memory
 
   ssh_username = "root"
   ssh_password = var.root_password
   ssh_timeout = "10000s"
 
+  vnc_bind_address = var.vnc_bind_address
+
   qemuargs = [
-    ["-cpu", var.cpu_type],
     ["-boot", "strict=off"],
     ["-monitor", "none"],
     ["-device", "virtio-scsi-pci"],
@@ -169,10 +124,8 @@ source "qemu" "qemu" {
 
   iso_checksum = var.checksum
   iso_target_extension = local.iso_target_extension
-  iso_target_path = local.iso_target_path
-  iso_urls = [
-    "http://cdn.openbsd.org/pub/OpenBSD/${var.os_version}/${local.image_architecture}/${local.image}"
-  ]
+  iso_target_path = local.iso_full_target_path
+  iso_url = "http://cdn.openbsd.org/pub/OpenBSD/${var.os_version}/${local.image_architecture}/${local.image}"
 
   http_directory = "."
   output_directory = "output"
@@ -184,15 +137,6 @@ build {
   sources = ["qemu.qemu"]
 
   provisioner "shell" {
-    script = "resources/provision.sh"
-    environment_vars = [
-      "SECONDARY_USER=${var.secondary_user_username}",
-      "SUDO_VERSION=${var.sudo_version}",
-      "RSYNC_VERSION=${var.rsync_version}"
-    ]
+    script = "provision.sh"
   }
-
-  /*provisioner "shell-local" {
-    inline = ["if [ -d packer_cache_backup ]; then cp packer_cache_backup/* ${local.iso_target_path}; fi"]
-  }*/
 }

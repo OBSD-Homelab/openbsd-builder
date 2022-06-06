@@ -1,5 +1,9 @@
+checksum
 resources/ovmf.fd
 resources/qemu_efi.fd
 packer_cache
 packer_cache_backup
+openbsd.pkrvars.hcl
+install.conf
 output
+OVMF.fd
