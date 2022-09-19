@@ -2,14 +2,19 @@
 
 set -exu
 
+PKG_ADD="pkg_add"
+if [ "${OS_VERSION}" = "snapshots" ]; then
+    PKG_ADD="pkg_add -Dsnap"
+fi
+
 install_extra_packages() {
-  pkg_add bash
-  pkg_add curl
-  pkg_add rsync--
+  ${PKG_ADD} bash
+  ${PKG_ADD} curl
+  ${PKG_ADD} rsync--
 }
 
 setup_sudo() {
-  pkg_add sudo--
+  ${PKG_ADD} sudo--
 
   cat <<EOF > /etc/sudoers
 #includedir /etc/sudoers.d

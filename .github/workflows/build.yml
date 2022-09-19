@@ -18,11 +18,7 @@ jobs:
         fail-fast: false
         matrix:
           version:
-            - 6.8
-            - 6.9
-            - 7.1
-            - 7.2
-            - 7.3
+            - snapshots
 
           architecture:
             - x86-64
@@ -42,6 +38,19 @@ jobs:
               matrix.architecture == 'arm64' && 'aarch64' ||
               matrix.architecture
             }}
+
+      - name: Find snapshot variables
+        if: ${{ matrix.version == 'snapshots' }}
+        run: |
+          bash create_vars.sh ${OBSD_ARCH} ${LOCAL_ARCH}
+          echo "SNAP_SUM=$(cat checksum)" >> ${GITHUB_ENV}
+        env:
+          OBSD_ARCH: ${{
+              matrix.architecture == 'x86-64' && 'amd64' ||
+              matrix.architecture == 'arm64' && 'arm64' ||
+              matrix.architecture
+            }}
+          LOCAL_ARCH: ${{ matrix.architecture }}
 
       - uses: hashicorp/setup-packer@main
         with:
