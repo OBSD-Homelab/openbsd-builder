@@ -2,11 +2,10 @@ name: Build VM Disk Image
 
 on:
   push:
-    branches: '*'
-    tags: 'v*'
-  pull_request:
-    branches:
-      - master
+    branches: master
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *'
 
 jobs:
   build:
@@ -15,14 +14,14 @@ jobs:
     container: ubuntu:22.10
     timeout-minutes: 60
     strategy:
-        fail-fast: false
-        matrix:
-          version:
-            - snapshots
+      fail-fast: false
+      matrix:
+        version:
+          - snapshots
 
-          architecture:
-            - x86-64
-            - arm64
+        architecture:
+          - x86-64
+          - arm64
 
     steps:
       - name: Clone Repository
@@ -30,8 +29,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Dependencies
-        run: apt update && apt install curl unzip "qemu-system-$QEMU_ARCHITECTURE" -y
+      - name: Install Dependecies
+        if: steps.openbsd-current.outputs.cache-hit != 'true'
+        run: |
+          apt update
+          apt install -y curl unzip "qemu-system-${QEMU_ARCHITECTURE}"
         env:
           QEMU_ARCHITECTURE: ${{
               matrix.architecture == 'x86-64' && 'x86' ||
@@ -44,10 +46,12 @@ jobs:
         run: |
           bash create_vars.sh ${OBSD_ARCH} ${LOCAL_ARCH}
           echo "SNAP_SUM=$(cat checksum)" >> ${GITHUB_ENV}
+          echo "LOCAL_ARCH=${LOCAL_ARCH}" >> ${GITHUB_ENV}
+          echo "OBSD_ARCH=${OBSD_ARCH}" >> ${GITHUB_ENV}
+          echo "WORKFLOW_TYPE = ${{ github.event_name }}"
         env:
           OBSD_ARCH: ${{
               matrix.architecture == 'x86-64' && 'amd64' ||
-              matrix.architecture == 'arm64' && 'arm64' ||
               matrix.architecture
             }}
           LOCAL_ARCH: ${{ matrix.architecture }}
@@ -56,21 +60,26 @@ jobs:
         with:
           version: "1.7.1"
 
+      - name: Cache OpenBSD-current checksum
+        id: openbsd-current
+        uses: actions/cache@v3
+        with:
+          path: output
+          key: ${{ env.SNAP_SUM }}-output
+
+
       - name: Install UEFI
-        if: matrix.architecture == 'x86-64'
+        if: ${{ matrix.architecture == 'x86-64' && steps.openbsd-current.outputs.cache-hit != 'true' }}
         run: |
-          bash -c "apt update
           apt install ovmf
-          cp /usr/share/ovmf/OVMF.fd resources/ovmf.fd"
+          cp /usr/share/ovmf/OVMF.fd resources/ovmf.fd
 
       - name: Download QEMU UEFI
-        if: matrix.architecture == 'arm64'
-        run: curl -o resources/qemu_efi.fd -L https://releases.linaro.org/components/kernel/uefi-linaro/latest/release/qemu64/QEMU_EFI.fd
-
-      # - name: Setup tmate session
-      #   uses: mxschmitt/action-tmate@v3
+        if: ${{ matrix.architecture == 'arm64' && steps.openbsd-current.outputs.cache-hit != 'true' }}
+        run: curl -o resources/qemu_efi.fd -L http://releases.linaro.org/components/kernel/uefi-linaro/latest/release/qemu64/QEMU_EFI.fd
 
       - name: Build Image
+        if: steps.openbsd-current.outputs.cache-hit != 'true'
         run: |
           PACKER_LOG=1 ./build.sh \
             '${{ matrix.version }}' \
@@ -78,18 +87,17 @@ jobs:
             -var 'headless=true' \
             -var 'readonly_boot_media=false'
 
-      - name: Extract Version
-        id: version
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: echo ::set-output name=VERSION::${GITHUB_REF#refs/tags/v}
+      - name: Create qcow2 signature
+        if: steps.openbsd-current.outputs.cache-hit != 'true'
+        run: |
+          sha256sum output/openbsd-snapshots-${LOCAL_ARCH}.qcow2 > output/openbsd-snapshots-${LOCAL_ARCH}.sig
 
-      - name: Create Release
-        id: create_release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v1
+      - name: Create current release
+        if: ${{ steps.openbsd-current.outputs.cache-hit != 'true' || github.event_name == 'workflow_dispatch' }}
+        continue-on-error: true
+        uses: pyTooling/Actions/releaser@r0
         with:
-          name: OpenBSD ${{ steps.version.outputs.VERSION }}
-          draft: true
-          files: output/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: current
+          files:
+            output/openbsd-snapshots*
