@@ -30,7 +30,6 @@ jobs:
           persist-credentials: false
 
       - name: Install Dependecies
-        if: steps.openbsd-current.outputs.cache-hit != 'true'
         run: |
           apt update
           apt install -y curl unzip "qemu-system-${QEMU_ARCHITECTURE}"
@@ -66,7 +65,6 @@ jobs:
         with:
           path: output
           key: ${{ env.SNAP_SUM }}-output
-
 
       - name: Install UEFI
         if: ${{ matrix.architecture == 'x86-64' && steps.openbsd-current.outputs.cache-hit != 'true' }}
