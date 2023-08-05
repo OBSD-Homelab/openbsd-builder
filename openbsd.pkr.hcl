@@ -119,6 +119,7 @@ variable "readonly_boot_media" {
 locals {
   image_architecture = var.architecture == "x86-64" ? "amd64" : var.architecture
   image = "miniroot${var.os_number}.img"
+  image_full_remote_path = "${var.os_version}/${local.image_architecture}/${local.image}"
   vm_name = "openbsd-${var.os_version}-${var.architecture}.qcow2"
 
   iso_target_extension = "img"
